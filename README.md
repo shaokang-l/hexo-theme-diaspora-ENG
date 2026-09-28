@@ -154,7 +154,12 @@ cover:
   - /img/cover.jpg
   - /img/welcome-cover.jpg
 
- 
+# 是否显示Twitter分享卡片图像(图像尺寸要求：1200*600，creatorid不需要带@符号。注意：链接必须是完整url，否则Twitter将无法读取图片信息）
+twitterpic:
+  enable: false
+  src: https://bangdream.moe/img/ident.png
+  creatorid: yourtwitteridhere
+
 # 是否关闭默认滚动条
 scrollbar: true
 
@@ -188,26 +193,21 @@ beian:
 # 是否使用mathjax
 mathjax: false
 
-# Gitalk 评论插件（https://github.com/gitalk/gitalk）
-gitalk:
+# Valine 评论 (LeanCloud, https://valine.js.org)
+valine:
     # 是否启用评论功能
     enable: false
     # 是否自动展开评论框
     autoExpand: false
-    # 应用编号
-    clientID: ''
-    # 应用秘钥
-    clientSecret: ''
-    # issue仓库名
-    repo: ''
-    # Github名
-    owner: ''
-    # Github名
-    admin: ['']
-    # Ensure uniqueness and length less than 50
-    id: location.pathname
-    # Facebook-like distraction free mode
-    distractionFreeMode: false
+    # LeanCloud 应用的 AppID / AppKey
+    appId: ''
+    appKey: ''
+    # 评论框占位文字
+    placeholder: '到此一游'
+    # 头像风格: mp, identicon, monsterid, wavatar, retro, robohash, hide
+    avatar: robohash
+    # 提交时需要验证码
+    verify: true
 
 # 网站关键字
 keywords: Fechin
@@ -223,3 +223,28 @@ rss: atom.xml
 
 ```
 
+
+### NPR 三维封面与菜单 (three.js)
+
+首页封面是一个手绘风格 (NPR) 的 three.js 场景：雾中森林与鹿角发出金光的鹿；菜单是一个小房间，每个菜单项对应房间里一个可点击的物件。
+不支持 WebGL2 的浏览器、加载失败或关闭此功能时，仍显示原来的封面图和文字菜单。
+
+The home cover is an illustrated (NPR) three.js forest with a golden-antlered stag, and the menu is a small
+room in which every entry is a clickable object. Without WebGL2, on any loading error, or when disabled,
+the original cover painting and text menu are shown.
+
+```yml
+npr:
+  enable: true            # 总开关 / master switch
+  hero: true              # 首页 3D 封面 / 3D home cover
+  menu_room: true         # 3D 菜单房间 / 3D menu room
+  mobile: true            # 触屏、小屏、低端设备也运行 (低画质) / also on touch, narrow or low-end devices (low quality)
+  overlay_color: "#102a33" # 3D 封面开启时左侧多边形的颜色 / #vibrant polygon colour over the 3D cover
+  accent_color: "#f5c46a"  # 搜索、菜单图标颜色, 也传给场景 / icon colour over the cover, also used by the scenes
+  room_objects:           # 菜单名 -> 物件, 未列出的显示为木箱 (crate) / menu name -> object, others become a crate
+    Category: bookshelf   # 可选 / keys: bookshelf tags cabinet portrait gramophone sofa desk corkboard easel
+```
+
+调试 / debug: `?npr=0` 关闭 3D (显示原主题) / disables the scenes; `?npr=low` 强制低画质 / forces low quality.
+代码 / code: `source/js/npr/` (`boot.js` 入口 / entry, `core.js` NPR 渲染 / rendering, `forest.js`, `room.js`),
+`source/css/npr.css`, `source/css/npr-room.css`, three.js r170 in `source/js/three/`.

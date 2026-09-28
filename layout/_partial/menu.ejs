@@ -1,7 +1,11 @@
+<% var nprRoom = theme.npr && theme.npr.enable && theme.npr.menu_room, nprObjects = (theme.npr && theme.npr.room_objects) || {}, nprIndex = 0; %>
 <div class="nav">
+    <% if (nprRoom){ %>
+    <div class="npr-room" aria-hidden="true"></div>
+    <% } %>
     <ul id="menu-menu" class="menu">
         <% for (var i in theme.menu){ %>
-        <li class="<%- theme.menu[i].indexOf('http') > -1 ? " " : "pview" %> menu-item menu-item-type-post_type menu-item-object-page">
+        <li class="<%- theme.menu[i].indexOf('http') > -1 ? " " : "pview" %> menu-item menu-item-type-post_type menu-item-object-page"<% if (nprRoom){ %> data-npr-object="<%= nprObjects[i] || 'crate' %>" data-npr-index="<%= nprIndex++ %>"<% } %>>
             <%- link_to(theme.menu[i].lastIndexOf('/') > 0 ? theme.menu[i] : theme.menu[i] + '/', i, {external: true})%>
         </li>
         <%}%>

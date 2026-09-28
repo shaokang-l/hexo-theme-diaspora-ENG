@@ -1,1 +1,3 @@
-<div id="gitalk-container" class="comment link">加载评论</div>
+<% if (theme.valine && theme.valine.enable){ %>
+<div id="gitalk-container" class="comment link"<% if (theme.valine.autoExpand){ %> data-ae="true"<% } %>>Load Comments</div>
+<% } %>

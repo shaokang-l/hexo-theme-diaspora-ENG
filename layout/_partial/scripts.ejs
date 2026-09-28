@@ -1,6 +1,20 @@
-<% if (theme.gitalk.enable){ %>
+<% if (theme.valine && theme.valine.enable){ %>
     <%- js(['js/Valine.min.js'])%>
+    <script id="valine-config" type="application/json"><%- JSON.stringify({
+        appId: theme.valine.appId, appKey: theme.valine.appKey,
+        placeholder: theme.valine.placeholder, avatar: theme.valine.avatar, verify: theme.valine.verify !== false
+    }).replace(/</g, '\\u003c') %></script>
         <%}%>
-            <%- js(['//lib.baomitu.com/jquery/1.8.3/jquery.min.js', 'js/plugin.js' , 'js/typed.js' , 'js/diaspora.js'
+            <%- js(['js/jquery.min.js', 'js/plugin.js' , 'js/typed.js' , 'js/diaspora.js'
                 ])%>
                 <%- partial('photoswipe') %>
+<% if (theme.npr && theme.npr.enable){ %>
+    <script id="npr-config" type="application/json"><%- JSON.stringify({
+        hero: theme.npr.hero !== false,
+        menu_room: theme.npr.menu_room !== false,
+        mobile: theme.npr.mobile !== false,
+        accent: theme.npr.accent_color || '#f5c46a',
+        pages: theme.npr.pages || {}
+    }).replace(/</g, '\\u003c') %></script>
+    <script type="module" src="<%- url_for('js/npr/boot.js') %>"></script>
+<% } %>
