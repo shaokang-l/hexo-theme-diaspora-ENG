@@ -105,6 +105,10 @@ rss: atom.xml
 # 调试 / debug: ?npr=0 (关闭 / off), ?npr=low (低画质 / low quality)
 npr:
   enable: true
+  # 夜间模式 (每页右上角的太阳/月亮按钮, 访客的选择会被记住) 的默认值: auto 跟随系统深色设置, day 白天, night 夜间
+  # night mode default (the sun/moon toggle on every page remembers each visitor's choice):
+  # auto = follow the OS dark setting, day, night. Links can force it with ?night=1 / ?night=0
+  night_default: auto
   # 首页 3D 封面 / 3D hero on the home page (the painting above stays as fallback)
   hero: true
   # 菜单房间 / menu as a 3D room (the text menu stays as fallback)

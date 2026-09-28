@@ -1,6 +1,6 @@
 // NPR (non-photorealistic) toolkit shared by the Diaspora hero (forest.js) and menu (room.js) scenes:
 // environment helpers, a cel/toon material, a post-processing chain (HDR scene -> ink outlines -> bloom ->
-// tone map / grade / paper / vignette) and a self-managing render stage.
+// optional god rays -> tone map / grade / paper / vignette) and a self-managing render stage.
 import * as THREE from 'three';
 
 export const OUTLINE_LAYER = 1;
@@ -462,10 +462,78 @@ void main() {
 }
 `;
 
+// God rays, step 1 (at reduced resolution): the light mask. Sky / empty / far pixels of the normal-depth
+// prepass transmit (so outline-layer geometry occludes), weighted by a soft disc around the light and
+// optionally seeded by the scene's own brightness and hue (the glow itself emits the rays).
+const RAY_MASK_FRAG = /* glsl */`
+uniform sampler2D tND;
+uniform sampler2D tScene;
+uniform vec2 uTexel;     // mask texel (uv)
+uniform vec2 uLight;     // light position (uv)
+uniform float uAspect;
+uniform float uRadius;   // emitting disc radius in screen heights (0 = no disc)
+uniform vec2 uDist;      // view distance ramp: geometry nearer than x occludes, beyond y transmits
+uniform vec2 uSeed;      // scene-luminance threshold and knee (threshold <= 0: every open pixel emits)
+uniform float uEmissive; // occluders brighter than this emit too (glowing antlers, lamps); 0 = off
+uniform float uSceneTint;
+varying vec2 vUv;
+float transmit( vec2 uv ) {
+  float a = texture2D( tND, uv ).a; // 1 / view depth, 0 = nothing drawn
+  return a <= 0.0 ? 1.0 : smoothstep( uDist.x, uDist.y, 1.0 / a );
+}
+void main() {
+  vec2 o = uTexel * 0.25; // 4 taps: coverage of thin occluders instead of a single aliased sample
+  float t = 0.25 * ( transmit( vUv - o ) + transmit( vUv + o ) + transmit( vUv + vec2( o.x, - o.y ) ) + transmit( vUv - vec2( o.x, - o.y ) ) );
+  vec2 d = ( vUv - uLight ) * vec2( uAspect, 1.0 );
+  float disc = uRadius > 0.0 ? exp( - dot( d, d ) / ( uRadius * uRadius ) ) : 1.0;
+  vec3 s = texture2D( tScene, vUv ).rgb;
+  s = dot( s, vec3( 1.0 ) ) < 1e4 ? clamp( s, 0.0, 64.0 ) : vec3( 0.0 );
+  float l = dot( s, vec3( 0.2126, 0.7152, 0.0722 ) );
+  if ( uEmissive > 0.0 ) t = max( t, smoothstep( uEmissive * 0.8, uEmissive * 1.25, l ) );
+  float seed = uSeed.x > 0.0 ? smoothstep( uSeed.x - uSeed.y, uSeed.x + uSeed.y, l ) : 1.0;
+  vec3 hue = mix( vec3( 1.0 ), s / max( max( s.r, max( s.g, s.b ) ), 1e-3 ), uSceneTint );
+  gl_FragColor = vec4( hue * ( t * disc * seed ), 1.0 );
+}
+`;
+
+// God rays, step 2: radial blur toward the light (GPU Gems 3, ch. 13), run twice: a coarse pass over the
+// whole ray with a per-pixel jittered start, then a fine pass spanning one coarse step, which integrates
+// the gaps (SAMPLES² effective taps: no banding, no dither noise). The fine pass turns the mean into the
+// light gathered along the ray (so a shaft keeps its strength past the emitting disc) times a falloff with
+// the distance from the light.
+const RAY_BLUR_FRAG = /* glsl */`
+uniform sampler2D tSrc;
+uniform vec2 uLight;
+uniform float uLength;   // fraction of the way to the light covered by this pass
+uniform vec4 uGain;      // fine pass (w = 1): x = 1 / disc integral (0: keep the mean), y = ln( decay ), z = aspect, and
+uniform float uSpan;     // the fraction of the way to the light the whole ray covers
+varying vec2 vUv;
+void main() {
+  vec2 st = ( uLight - vUv ) * ( uLength / float( SAMPLES ) );
+  // interleaved gradient noise: a fixed screen-space pattern (no temporal shimmer)
+  vec2 uv = vUv + st * fract( 52.9829189 * fract( dot( gl_FragCoord.xy, vec2( 0.06711056, 0.00583715 ) ) ) );
+  vec3 acc = vec3( 0.0 );
+  for ( int i = 0; i < SAMPLES; i ++ ) {
+    acc += texture2D( tSrc, uv ).rgb;
+    uv += st;
+  }
+  acc /= float( SAMPLES );
+  if ( uGain.w > 0.0 ) {
+    float d = length( ( vUv - uLight ) * vec2( uGain.z, 1.0 ) ); // screen heights to the light
+    if ( uGain.x > 0.0 ) acc *= max( d * uSpan * uGain.x, 1.0 );
+    acc *= exp( uGain.y * d );
+  }
+  gl_FragColor = vec4( acc, 1.0 );
+}
+`;
+
 const COMPOSITE_FRAG = /* glsl */`
 uniform sampler2D tScene;
 uniform sampler2D tEdge;
 uniform sampler2D tBloom;
+uniform sampler2D tRays;
+uniform vec3 uRayColor;
+uniform float uRayDepth; // 1 / depthFade (0 = off)
 uniform sampler2D tPaint;
 uniform sampler2D tPaper;
 uniform sampler2D tND;
@@ -574,6 +642,15 @@ void main() {
   alpha = max( alpha, min( 1.0, luma( bl ) ) );
   #endif
 
+  #ifdef GODRAYS
+  vec3 rays = texture2D( tRays, vUv ).rgb * uRayColor * uExposure;
+  // in-scattering builds up with the air in front of a surface: near objects stay clear of the veil
+  float ndA = texture2D( tND, vUv ).a;
+  if ( uRayDepth > 0.0 && ndA > 0.0 ) rays *= 1.0 - exp( - uRayDepth / ndA );
+  col += rays;
+  alpha = max( alpha, min( 1.0, luma( rays ) ) );
+  #endif
+
   col = toneMap( col );
   col = 0.18 * pow( max( col, 0.0 ) / 0.18, vec3( uContrast ) );
   col = max( mix( vec3( luma( col ) ), col, uSaturation ), 0.0 );
@@ -607,6 +684,10 @@ void main() {
   col = vec3( 1.0 - texture2D( tEdge, vUv ).r );
   #elif NPR_DEBUG == 4
   col = toSRGB( toneMap( texture2D( tBloom, vUv ).rgb * uBloomStrength ) );
+  #elif NPR_DEBUG == 5
+  col = toSRGB( toneMap( texture2D( tRays, vUv ).rgb * uRayColor ) );
+  #elif NPR_DEBUG == 6
+  col = texture2D( tRays, vUv ).rgb;
   #endif
   gl_FragColor = vec4( col, alpha );
 }
@@ -674,11 +755,37 @@ const DEFAULT_PARAMS = () => ({
   painterly: { enabled: false, radius: 3, strength: 1 },
   grade: { exposure: 1, contrast: 1, saturation: 1, tint: 0xffffff, lift: 0x000000, gain: 0xffffff },
   vignette: { strength: 0.3, softness: 0.65, color: 0x0b0d14 },
+  // Volumetric light scattering ("crepuscular rays") streaming from a light, occluded by outline-layer
+  // geometry (sky, empty pixels, particles and geometry beyond maxDistance let light through). Added before
+  // tone mapping, so exposure / grade / vignette apply. Off by default (then it costs nothing).
+  godrays: {
+    enabled: false,
+    // Light, read every frame: a world point (THREE.Vector3 or any {x, y, z}), an Object3D (its world
+    // position), or a direction toward a light at infinity (sun, sky glow) as a THREE.Vector4 / {x, y, z}
+    // with w = 0. null = off.
+    position: null,
+    color: 0xffe0a8,      // ray colour (multiplied by the mask hue, see sceneTint)
+    intensity: 1,         // animate this (or color) for day / night; 0 skips the passes
+    density: 1,           // ray length as a fraction of the distance from each pixel to the light
+    decay: 0.35,          // shaft brightness left one screen height away from the light (1 = no falloff)
+    radius: 0.3,          // emitting disc round the light, in screen heights (Gaussian); 0 = all open sky emits
+    threshold: 0,         // > 0: only pixels brighter than this (linear scene luminance, soft knee) emit
+    knee: 0.25,
+    emissive: 0,          // > 0: occluders brighter than this luminance emit too (glowing antlers, lamps)
+    sceneTint: 0.5,       // 0..1: rays take the hue of the sky they stream out of
+    maxDistance: 80,      // view distance beyond which geometry transmits light like the sky ...
+    softness: 0.4,        // ... ramping in over this fraction of maxDistance
+    depthFade: 8,         // shafts build up over this view distance in front of geometry (near objects stay
+                          // clear, 1 - exp(-z / depthFade)); 0 = rays veil everything equally
+    fadeOffscreen: 0.35,  // rays fade out as the light leaves the view (screen heights past the edge); 0 = never
+    samples: 'auto',      // taps per blur pass (two passes): 'auto' = 32 high / 20 low quality
+    resolution: 'auto',   // mask / blur buffer scale of the render size: 'auto' = 0.5 high / 0.35 low
+  },
   fxaa: 'auto', // FXAA-style scene AA: 'auto' = only when the scene buffer has no MSAA (low quality)
-  debug: 'off', // 'off' | 'normals' | 'depth' | 'edges' | 'bloom'
+  debug: 'off', // 'off' | 'normals' | 'depth' | 'edges' | 'bloom' | 'rays' | 'raymask'
 });
 
-const DEBUG_VIEWS = { off: 0, normals: 1, depth: 2, edges: 3, bloom: 4 };
+const DEBUG_VIEWS = { off: 0, normals: 1, depth: 2, edges: 3, bloom: 4, rays: 5, raymask: 6 };
 // Face culled by three's shadow pass for each material side (WebGLShadowMap's `shadowSide`).
 const SHADOW_SIDE = { [THREE.FrontSide]: THREE.BackSide, [THREE.BackSide]: THREE.FrontSide, [THREE.DoubleSide]: THREE.DoubleSide };
 
@@ -722,7 +829,10 @@ export function createNPRPipeline(renderer, params, { quality = 'high' } = {}) {
     down.push(new THREE.WebGLRenderTarget(1, 1, rtOpts));
     if (i < bloomLevels - 1) up.push(new THREE.WebGLRenderTarget(1, 1, rtOpts));
   }
-  const targets = [sceneRT, ndRT, edgeRT, paintRT, ...down, ...up];
+  // God rays: mask -> rayA, coarse blur -> rayB, fine blur -> rayA (GPU memory only once they are used).
+  const rayA = new THREE.WebGLRenderTarget(1, 1, rtOpts);
+  const rayB = new THREE.WebGLRenderTarget(1, 1, rtOpts);
+  const targets = [sceneRT, ndRT, edgeRT, paintRT, ...down, ...up, rayA, rayB];
 
   if (!paperData) paperData = makePaperData();
   const paper = new THREE.DataTexture(paperData, 256, 256, THREE.RGBAFormat, THREE.UnsignedByteType,
@@ -759,11 +869,19 @@ export function createNPRPipeline(renderer, params, { quality = 'high' } = {}) {
     uExposure: { value: 1 }, uContrast: { value: 1 }, uSaturation: { value: 1 }, uTint: col(), uLift: col(),
     uGain: col(), uPaperStrength: { value: 0 }, uPaperScale: { value: 1 }, uPaperTint: col(),
     uVigStrength: { value: 0 }, uVigSoftness: { value: 0.5 }, uVigColor: col(),
+    tRays: { value: rayA.texture }, uRayColor: col(), uRayDepth: { value: 0 },
   };
   const compMat = post(COMPOSITE_FRAG, cu, { NPR_DEBUG: 0 });
   compMat.transparent = false;
   compMat.blending = THREE.NoBlending;
-  const materials = [edgeMat, downMat, prefilterMat, upMat, paintMat, compMat];
+  const rayMaskMat = post(RAY_MASK_FRAG, {
+    tND: { value: ndRT.texture }, tScene: { value: sceneRT.texture }, uTexel: v2(), uLight: v2(),
+    uAspect: { value: 1 }, uRadius: { value: 0 }, uDist: v2(), uSeed: v2(), uEmissive: { value: 0 }, uSceneTint: { value: 0 },
+  });
+  const rayBlurMat = post(RAY_BLUR_FRAG, {
+    tSrc: { value: null }, uLight: v2(), uLength: { value: 1 }, uGain: { value: new THREE.Vector4() }, uSpan: { value: 1 },
+  }, { SAMPLES: 32 });
+  const materials = [edgeMat, downMat, prefilterMat, upMat, paintMat, compMat, rayMaskMat, rayBlurMat];
 
   // Prepass materials: shared defaults per side, per-material variants for alpha-tested / extended ones.
   const ndDefault = [THREE.FrontSide, THREE.BackSide, THREE.DoubleSide].map((side) => createNormalDepthMaterial({ side }));
@@ -827,7 +945,7 @@ export function createNPRPipeline(renderer, params, { quality = 'high' } = {}) {
     }
   }
 
-  let width = 1, height = 1, pixelRatio = 1, bufW = 1, bufH = 1, edgeScale = 1, ndW = 1, ndH = 1;
+  let width = 1, height = 1, pixelRatio = 1, bufW = 1, bufH = 1, edgeScale = 1, ndW = 1, ndH = 1, rayScale = 0.5;
   const savedClear = new THREE.Color();
   const stats = { calls: 0, triangles: 0, sceneCalls: 0, sceneTriangles: 0, prepassCalls: 0, prepassTriangles: 0 };
 
@@ -839,14 +957,31 @@ export function createNPRPipeline(renderer, params, { quality = 'high' } = {}) {
 
   function edgeScaleFor(pr) {
     const s = P.outline.supersample;
+    if (!P.outline.enabled) return 1; // (prepass used by god rays only: no need to supersample)
     if (typeof s === 'number' && s > 0) return Math.min(2, Math.max(1, s));
     return pr < 1.4 ? Math.min(2, 1.75 / pr) : 1;
+  }
+
+  function rayScaleFor() {
+    const s = P.godrays.resolution;
+    return typeof s === 'number' && s > 0 ? Math.min(1, Math.max(0.125, s)) : high ? 0.5 : 0.35;
+  }
+
+  function raySamplesFor() {
+    const n = P.godrays.samples;
+    return typeof n === 'number' && n > 0 ? Math.min(96, Math.max(4, Math.round(n))) : high ? 32 : 20;
   }
 
   function setSize(w, h, pr = pixelRatio) {
     width = Math.max(1, w); height = Math.max(1, h); pixelRatio = pr;
     bufW = Math.max(1, Math.floor(width * pr)); bufH = Math.max(1, Math.floor(height * pr));
     edgeScale = edgeScaleFor(pr);
+    rayScale = rayScaleFor();
+    const rw = Math.max(1, Math.round(bufW * rayScale)), rh = Math.max(1, Math.round(bufH * rayScale));
+    rayA.setSize(rw, rh);
+    rayB.setSize(rw, rh);
+    rayMaskMat.uniforms.uTexel.value.set(1 / rw, 1 / rh);
+    rayMaskMat.uniforms.uAspect.value = bufW / bufH;
     ndW = Math.max(1, Math.round(bufW * edgeScale)); ndH = Math.max(1, Math.round(bufH * edgeScale));
     sceneRT.setSize(bufW, bufH);
     ndRT.setSize(ndW, ndH);
@@ -895,6 +1030,82 @@ export function createNPRPipeline(renderer, params, { quality = 'high' } = {}) {
     }
   }
 
+  function raysEnabled() {
+    const GR = P.godrays;
+    return !!(GR && GR.enabled && GR.position);
+  }
+
+  // Screen position of the god-ray light for the render camera (into rayLight, uv units); returns the
+  // fade (0 when it is behind the camera or far off-screen).
+  const rayColor = col(), rayLight = new THREE.Vector2(), _rayV = new THREE.Vector4(), _rayCam = new THREE.Vector3(), _rayM = new THREE.Matrix4();
+  function projectRayLight(camera) {
+    const GR = P.godrays, p = GR.position;
+    if (p.isObject3D) {
+      p.getWorldPosition(_rayCam);
+      _rayV.set(_rayCam.x, _rayCam.y, _rayCam.z, 1);
+    } else if (p.w === 0) {
+      // direction: a point far along it from the camera projects exactly like the light at infinity
+      _rayCam.setFromMatrixPosition(camera.matrixWorld);
+      const far = camera.isPerspectiveCamera ? (camera.near + camera.far) * 0.5 : 1e3;
+      const l = Math.hypot(p.x, p.y, p.z) || 1;
+      _rayV.set(_rayCam.x + p.x / l * far, _rayCam.y + p.y / l * far, _rayCam.z + p.z / l * far, 1);
+    } else {
+      _rayV.set(p.x, p.y, p.z, 1);
+    }
+    _rayV.applyMatrix4(camera.matrixWorldInverse);
+    // facing: cosine between the view axis and the light (fades rays as the light swings behind)
+    const len = Math.hypot(_rayV.x, _rayV.y, _rayV.z);
+    const facing = len > 0 ? -_rayV.z / len : 0;
+    if (facing <= 0 && camera.isPerspectiveCamera) return 0;
+    _rayV.applyMatrix4(camera.projectionMatrix);
+    const w = _rayV.w > 1e-6 ? _rayV.w : 1e-6;
+    const u = THREE.MathUtils.clamp(_rayV.x / w * 0.5 + 0.5, -2, 3);
+    const v = THREE.MathUtils.clamp(_rayV.y / w * 0.5 + 0.5, -2, 3);
+    rayLight.set(u, v);
+    let fade = camera.isPerspectiveCamera ? THREE.MathUtils.smoothstep(facing, 0, 0.2) : 1;
+    if (GR.fadeOffscreen > 0) {
+      const ox = Math.max(0, -u, u - 1) * (bufW / bufH), oy = Math.max(0, -v, v - 1);
+      fade *= 1 - THREE.MathUtils.smoothstep(Math.hypot(ox, oy), 0, GR.fadeOffscreen);
+    }
+    return fade;
+  }
+
+  // Mask + two radial blur passes into rayA; returns false when there is nothing to draw.
+  function renderRays(camera) {
+    const GR = P.godrays;
+    const fade = GR.intensity > 0 ? projectRayLight(camera) : 0;
+    const k = GR.intensity * fade;
+    syncColor(rayColor, GR.color);
+    cu.uRayColor.value.copy(rayColor.value).multiplyScalar(k);
+    if (k <= 0) return false;
+    const mu = rayMaskMat.uniforms;
+    mu.uLight.value.copy(rayLight);
+    mu.uRadius.value = Math.max(0, GR.radius);
+    const far = Math.max(1e-3, GR.maxDistance);
+    mu.uDist.value.set(far * (1 - THREE.MathUtils.clamp(GR.softness, 0, 1)) - 1e-3, far);
+    mu.uSeed.value.set(GR.threshold, Math.max(1e-3, GR.knee));
+    mu.uEmissive.value = Math.max(0, GR.emissive);
+    mu.uSceneTint.value = THREE.MathUtils.clamp(GR.sceneTint, 0, 1);
+    cu.uRayDepth.value = GR.depthFade > 0 ? 1 / GR.depthFade : 0;
+    blit(rayMaskMat, rayA);
+    if (P.debug === 'raymask') return true;
+    const bu = rayBlurMat.uniforms, n = rayBlurMat.defines.SAMPLES;
+    const len = THREE.MathUtils.clamp(GR.density, 0, 1);
+    bu.uLight.value.copy(rayLight);
+    bu.tSrc.value = rayA.texture;
+    bu.uLength.value = len;
+    bu.uGain.value.set(0, 0, 0, 0);
+    blit(rayBlurMat, rayB);
+    bu.tSrc.value = rayB.texture;
+    bu.uLength.value = len / n;
+    bu.uSpan.value = len;
+    // Gaussian disc: the light gathered crossing it is 0.886 r (open sky everywhere, radius 0: keep the mean)
+    bu.uGain.value.set(GR.radius > 0 ? 1 / (0.886 * GR.radius) : 0, Math.log(THREE.MathUtils.clamp(GR.decay, 1e-3, 1)),
+      bufW / bufH, 1);
+    blit(rayBlurMat, rayA);
+    return true;
+  }
+
   // Composite variant for the current params (shared by render() and compile()).
   function syncComposite() {
     const O = P.outline, B = P.bloom, PA = P.paper, PT = P.painterly;
@@ -902,6 +1113,10 @@ export function createNPRPipeline(renderer, params, { quality = 'high' } = {}) {
     setDefine(compMat, 'BLOOM', B.enabled && B.strength > 0);
     setDefine(compMat, 'PAINTERLY', PT.enabled && PT.strength > 0);
     setDefine(compMat, 'PAPER', PA.enabled && PA.strength > 0);
+    // (kept on while intensity animates through 0, so a day / night cycle never recompiles the composite)
+    setDefine(compMat, 'GODRAYS', raysEnabled());
+    const n = raySamplesFor();
+    if (rayBlurMat.defines.SAMPLES !== n) { rayBlurMat.defines.SAMPLES = n; rayBlurMat.needsUpdate = true; }
     // Straight-alpha output only for a see-through canvas (three always creates an alpha context).
     setDefine(compMat, 'ALPHA', renderer.getClearAlpha() < 1);
     setDefine(compMat, 'FXAA', P.fxaa === 'auto' ? samples === 0 : !!P.fxaa);
@@ -1004,16 +1219,19 @@ export function createNPRPipeline(renderer, params, { quality = 'high' } = {}) {
     syncComposite();
     const O = P.outline, B = P.bloom, PT = P.painterly;
     const outline = O.enabled && O.opacity > 0, bloom = B.enabled && B.strength > 0, paint = PT.enabled && PT.strength > 0;
-    if (outline && edgeScaleFor(pixelRatio) !== edgeScale) setSize(width, height, pixelRatio);
+    const rays = raysEnabled();
+    if ((outline && edgeScaleFor(pixelRatio) !== edgeScale) || (rays && rayScaleFor() !== rayScale)) setSize(width, height, pixelRatio);
     const saved = renderer.getRenderTarget();
     const done = new Set();
     try {
       const used = [sceneRT];
       if (outline) used.push(ndRT, edgeRT);
+      else if (rays) used.push(ndRT);
+      if (rays) used.push(rayA, rayB);
       if (bloom) used.push(...down, ...up);
       if (paint) used.push(paintRT);
       for (const t of used) renderer.setRenderTarget(t);
-      if (outline) {
+      if (outline || rays) {
         const restore = swapAllForPrepass(scene);
         const mask = camera.layers.mask;
         camera.layers.mask = OUTLINE_BIT;
@@ -1036,6 +1254,7 @@ export function createNPRPipeline(renderer, params, { quality = 'high' } = {}) {
       if (outline) passes.push([edgeMat, edgeRT]);
       if (bloom) passes.push([prefilterMat, down[0]], [downMat, down[1]], [upMat, up[0]]);
       if (paint) passes.push([paintMat, paintRT]);
+      if (rays) passes.push([rayMaskMat, rayA], [rayBlurMat, rayB]);
       for (const [m, target] of passes) {
         quad.material = m;
         renderer.setRenderTarget(target);
@@ -1053,7 +1272,8 @@ export function createNPRPipeline(renderer, params, { quality = 'high' } = {}) {
     const outline = O.enabled && O.opacity > 0;
     const bloom = B.enabled && B.strength > 0;
     const paint = PT.enabled && PT.strength > 0;
-    if (outline && edgeScaleFor(pixelRatio) !== edgeScale) setSize(width, height, pixelRatio);
+    const rays = raysEnabled();
+    if ((outline && edgeScaleFor(pixelRatio) !== edgeScale) || (rays && rayScaleFor() !== rayScale)) setSize(width, height, pixelRatio);
     const info = renderer.info; // replaced by three.js after a context restore
     info.autoReset = false;
     info.reset();
@@ -1064,7 +1284,7 @@ export function createNPRPipeline(renderer, params, { quality = 'high' } = {}) {
     if (camAuto && camera.parent === null) camera.updateMatrixWorld();
     scene.matrixWorldAutoUpdate = false; camera.matrixWorldAutoUpdate = false;
     try {
-      if (outline) prepass(scene, camera);
+      if (outline || rays) prepass(scene, camera); // (god rays are occluded by the prepass geometry)
       stats.prepassCalls = info.render.calls; stats.prepassTriangles = info.render.triangles;
       renderer.setRenderTarget(sceneRT);
       renderer.render(scene, camera);
@@ -1116,6 +1336,7 @@ export function createNPRPipeline(renderer, params, { quality = 'high' } = {}) {
     }
 
     syncComposite();
+    if (rays) renderRays(camera);
     if (paint) {
       blit(paintMat, paintRT);
       cu.uPaintMix.value = PT.strength;

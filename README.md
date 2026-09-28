@@ -236,6 +236,7 @@ the original cover painting and text menu are shown.
 ```yml
 npr:
   enable: true            # 总开关 / master switch
+  night_default: auto     # 夜间模式默认值 / night mode default: auto (跟随系统 / follow the OS), day, night
   hero: true              # 首页 3D 封面 / 3D home cover
   menu_room: true         # 3D 菜单房间 / 3D menu room
   mobile: true            # 触屏、小屏、低端设备也运行 (低画质) / also on touch, narrow or low-end devices (low quality)
@@ -248,3 +249,23 @@ npr:
 调试 / debug: `?npr=0` 关闭 3D (显示原主题) / disables the scenes; `?npr=low` 强制低画质 / forces low quality.
 代码 / code: `source/js/npr/` (`boot.js` 入口 / entry, `core.js` NPR 渲染 / rendering, `forest.js`, `room.js`),
 `source/css/npr.css`, `source/css/npr-room.css`, three.js r170 in `source/js/three/`.
+
+### 夜间模式 / Night mode
+
+每个页面右上角都有一个太阳/月亮按钮 (首页在搜索、菜单图标左边, 文章和页面在顶栏右端), 切换温暖的夜间配色:
+文字页面变成深棕底、米色字、金色链接, 3D 场景 (森林、菜单房间、子页面插图) 换成灯光照亮的夜景。
+访客的选择保存在浏览器里 (`localStorage['npr-theme']`), 没有选择过时使用 `npr.night_default`
+(`auto` 跟随系统的深色模式)。链接可以带 `?night=1` / `?night=0` 强制夜间/白天 (会被记住)。
+
+Every page has a sun/moon button (home: left of the search and menu icons; posts and pages: right end of
+the top bar) that switches to a warm night palette: the text pages turn umber with cream text and gold links,
+and the 3D scenes (forest, menu room, sub-page vignettes) become lamp-lit night scenes. The visitor's choice is
+remembered (`localStorage['npr-theme']`); until they choose, `npr.night_default` applies (`auto` follows the
+OS dark setting). A link may force it with `?night=1` / `?night=0` (also remembered).
+
+- 状态 / state: `<html data-theme="night|day">`, set by an inline script in `layout/_partial/head.ejs` before the
+  first paint (no flash). The static `source/friends/index.html` carries a copy of that snippet.
+- 代码 / code: `source/js/theme.js` (button, storage, `window.NPRTheme = { isNight(), set(night), toggle() }`,
+  and a `npr:theme` event on `document` with `detail.night`), `source/css/night.css` (page styles).
+- 场景 / scenes: `boot.js` mounts every scene with `{ night }` and calls `setNight(night)` on each `npr:theme`.
+
