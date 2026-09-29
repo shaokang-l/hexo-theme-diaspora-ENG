@@ -1,4 +1,5 @@
 <% var first=page.posts.sort("date", "desc" ).eq(0); %>
+<% var heroSibs = first && typeof i18n_siblings == 'function' ? i18n_siblings(first) : []; %>
 <% var nprHero=theme.npr && theme.npr.enable && theme.npr.hero; %>
     <div id="screen">
         <div id="mark">
@@ -27,16 +28,17 @@
             </div>
         </div>
         <% if ( first ) { %>
-            <div id="post0">
-                <p>
+            <div id="post0"<% if (heroSibs.length && is_home()) { %> data-i18n="<%= i18n_cards(heroSibs, {length: 60, locale: 'en-us', untitled: config.title}) %>"<% } %>>
+                <p data-i18n-field="date">
                     <%- first.date.locale("en-us").format("MMMM DD, YYYY") %>
                 </p>
                 <h2>
                     <%- link_to(first.path, first.title || config.title, {class: "posttitle" }) %>
                 </h2>
-                <p class="summary">
+                <p class="summary" data-i18n-field="summary">
                     <%- truncate(strip_html(first.content), {length: 60, omission: '...' }) %>
                 </p>
+                <% if (heroSibs.length) { %><%- partial('_partial/post/i18n-chips', {sibs: heroSibs}) %><% } %>
             </div>
             <% } %>
     </div>

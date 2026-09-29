@@ -1,14 +1,21 @@
+<%
+// translations of this post (scripts/i18n-posts.js): language chips + data for js/i18n.js to show the visitor's language
+var i18nSibs = typeof i18n_siblings == 'function' ? i18n_siblings(post) : [];
+// only the home page lists one card per translation group, so only there may a card switch to the visitor's language
+var i18nData = i18nSibs.length && is_home() ? i18n_cards(i18nSibs, {length: 80, locale: 'zh-cn'}) : '';
+%>
 <% if (theme.list_thumbnail) { %>
-<div class="post">
+<div class="post"<% if (i18nData) { %> data-i18n="<%= i18nData %>"<% } %>>
     <a href="<%- url_for(post.path) %>" title="<%- post.title || "Untitled" %>">
         <%- image_tag(post.cover || theme.cover[Math.floor(Math.random() * theme.cover.length)], {class: "cover", width: 680, height: 440}) %>
     </a>
 <% } else { %>
-<div class="post plain">
+<div class="post plain"<% if (i18nData) { %> data-i18n="<%= i18nData %>"<% } %>>
 <% } %>
     <div class="else">
-        <p><%- post.date.locale("zh-cn").format("MMMM DD, YYYY") %></p>
+        <p data-i18n-field="date"><%- post.date.locale("zh-cn").format("MMMM DD, YYYY") %></p>
         <h3><%- link_to(post.path, post.title || "Untitled", {class: "posttitle"}) %></h3>
-        <p><%- truncate(strip_html(post.content), {length: 80, omission: '...'}) %></p>
+        <p data-i18n-field="summary"><%- truncate(strip_html(post.content), {length: 80, omission: '...'}) %></p>
+        <% if (i18nSibs.length) { %><%- partial('_partial/post/i18n-chips', {sibs: i18nSibs}) %><% } %>
     </div>
 </div>

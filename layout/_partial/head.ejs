@@ -64,6 +64,13 @@ var description = '';
     <%- css(['css/media-card.css'])%>
     <%- css(['css/night.css'])%>
     <script src="<%- url_for('js/theme.js') %>" defer></script>
+    <% if (theme.i18n_posts && theme.i18n_posts.enable !== false){ %>
+    <%- css(['css/i18n.css'])%>
+    <script src="<%- url_for('js/i18n.js') %>" defer></script>
+    <% var i18nAlt = is_post() && typeof i18n_siblings == 'function' ? i18n_siblings(page) : []; %>
+    <% i18nAlt.forEach(function (s) { %><link rel="alternate" hreflang="<%= s.lang %>" href="<%- full_url_for(s.path) %>">
+    <% }) %><% i18nAlt.filter(function (s) { return s.primary; }).forEach(function (s) { %><link rel="alternate" hreflang="x-default" href="<%- full_url_for(s.path) %>">
+    <% }) %><% } %>
     <% if (theme.npr && theme.npr.enable){ %>
     <%- css(['css/npr.css', 'css/npr-room.css'])%>
     <script type="importmap">{"imports":{"three":"<%- url_for('js/three/three.module.min.js') %>","three/addons/":"<%- url_for('js/three/addons/') %>"}}</script>

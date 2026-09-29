@@ -269,3 +269,73 @@ OS dark setting). A link may force it with `?night=1` / `?night=0` (also remembe
   and a `npr:theme` event on `document` with `detail.night`), `source/css/night.css` (page styles).
 - 场景 / scenes: `boot.js` mounts every scene with `{ night }` and calls `setNight(night)` on each `npr:theme`.
 
+
+### 多语言文章 / Translated posts
+
+同一篇文章的不同语言版本 (例如中文原文和英文翻译) 各自是一个普通的 `.md` 文件, 有自己的网址。
+在它们的 front matter 里写上**同一个** `i18n` key, 主题就会把它们当作一组:
+
+- 首页 (以及分页、"Click for more") 每组只列出一篇 (`i18n_posts.prefer` 语言的那篇), 卡片和首页大标题下面显示语言小标签 `中文 · English`;
+- 文章页标题下方显示语言切换 `中文 | English` (当前语言加粗), 在首页的 Ajax 预览里切换时原地替换, 按返回键回到首页;
+- 访客点过语言标签或切换后会被记住 (`localStorage['npr-lang']`), 之后首页卡片直接显示该语言的标题、摘要和链接;
+- 文章页 `<head>` 里有 `<link rel="alternate" hreflang="…">`, 正文带 `lang` 属性; 归档页在标题后标出语言;
+- 分类、标签、归档、搜索、sitemap 仍然列出每一个版本。
+
+Each language version of a post is an ordinary `.md` file with its own URL. Give all of them the **same**
+`i18n` key in the front matter and the theme treats them as one post:
+
+- the home page (and its pagination / "Click for more") lists the group once — the translation in
+  `i18n_posts.prefer` — with language chips `中文 · English` on the card and on the hero;
+- the post page shows a switch `中文 | English` under the title (in the home page's Ajax preview it swaps the
+  translation in place, and Back returns to the list);
+- a visitor who uses a chip or the switch is remembered (`localStorage['npr-lang']`) and home cards then show that
+  language's title, summary and link;
+- posts get `<link rel="alternate" hreflang="…">` tags and a `lang` attribute on the content; the archive marks the
+  language after the title;
+- categories, tags, archives, search and the sitemap still list every translation.
+
+**新增一个译本 / adding a translation**
+
+```yml
+# source/_posts/My_Post.md (原文 / original)
+title: 我的文章
+date: 2026-10-01 00:00:00
+i18n: my-post        # 任意不重复的名字, 同组相同 / any name, the same on every translation
+lang: zh             # 可省略 / optional
+
+# source/_posts/My_Post_en.md (译文 / translation)
+title: My Post
+date: 2026-10-01 00:00:00   # 建议与原文相同 / best keep the original's date
+i18n: my-post
+lang: en
+```
+
+1. 复制原文为新文件 (文件名随意, 例如加 `_en`), 翻译正文和标题; copy the post to a new file (any name, e.g. with
+   `_en`) and translate the title and text.
+2. 两个文件都写上同一个 `i18n:`; 写 `lang:` 最稳妥, 不写时按正文自动识别 (有假名 → `ja`, 有谚文 → `ko`,
+   其他 CJK 为主 → `zh`, 否则 `en`)。Put the same `i18n:` in both; `lang:` is safest, otherwise it is detected from
+   the text (kana → `ja`, hangul → `ko`, mostly CJK → `zh`, else `en`). Any code works (`fr`, `zh-TW` …).
+3. 给两者相同的 `date` (没写 date 的文章用文件修改时间, 排序会乱); give both the same `date` (a post without one uses
+   the file's mtime).
+4. 第三种语言同理, 再加一个同 key 的文件即可; a third language is just one more file with the same key.
+
+`hexo new post` 生成的新文章已经带有空的 `i18n:` / `lang:` 和一段提示注释 (`scaffolds/post.md`), 用不到时留空或删除。
+New posts from `hexo new` come with empty `i18n:` / `lang:` fields and a hint comment (`scaffolds/post.md`);
+leave them empty or delete them when the post has no translation.
+
+```yml
+i18n_posts:
+  enable: true        # false: 恢复原样, 每个版本都列在首页 / every translation listed separately again
+  prefer: zh          # 首页代表该组的语言, 没有时取最早的一篇 / language listed on the home page (fallback: earliest)
+  labels:             # 切换上显示的名字, 没列出的显示大写代码 (FR) / switch labels, others shown upper-cased
+    zh: 中文
+    en: English
+    ja: 日本語
+```
+
+- 代码 / code: `scripts/i18n-posts.js` (分组、语言识别、替换 `index` 生成器 / grouping, detection, replaces the
+  `index` generator of hexo-generator-index; helpers `i18n_siblings(post)`, `i18n_lang(post)`, `i18n_label(code)`,
+  `i18n_is_primary(post)`, `i18n_cards(sibs, opts)`), `layout/_partial/post/i18n-chips.ejs`,
+  `layout/_partial/post/i18n-switch.ejs`, `source/js/i18n.js` (记住语言 / remembered language), `source/css/i18n.css`.
+- `hexo server` 不会重新加载 `scripts/` 里修改过的文件, 改动脚本后需重启; after editing `scripts/`, restart `hexo server`.
+- 同一组里两篇相同语言会在生成时给出警告; two translations with the same language in one group log a warning.

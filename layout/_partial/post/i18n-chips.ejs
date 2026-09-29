@@ -1,0 +1,2 @@
+<%# language chips of a translated post on the home list / hero (sibs = i18n_siblings(post)); js/i18n.js marks the shown one %>
+<div class="i18n-chips" role="group" aria-label="Languages · 语言"><% sibs.forEach(function (s, i) { %><% if (i) { %><span class="i18n-dot" aria-hidden="true">·</span><% } %><a class="i18n-link i18n-chip<%= s.current ? ' is-shown' : '' %>" href="<%- url_for(s.path) %>" hreflang="<%= s.lang %>" lang="<%= s.lang %>" title="<%= s.title || 'Untitled' %>"><%= s.label %></a><% }) %></div>

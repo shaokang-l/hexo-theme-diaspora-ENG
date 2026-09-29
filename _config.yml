@@ -32,6 +32,20 @@ cover:
 # 首页文章列表是否显示封面缩略图 (关闭时为时间线式文字卡片) / show cover thumbnails in the home post list
 list_thumbnail: false
 
+# 多语言文章: 同一篇文章的各个译本在 front matter 里写同一个 `i18n: <key>` (可选 `lang: zh|en|ja…`, 不写则按正文自动识别),
+# 首页只列出其中一篇, 文章页显示语言切换. 详见 README
+# Translated posts: give every translation of a post the same `i18n: <key>` in its front matter (optional `lang:`,
+# auto-detected from the text when missing). The home page lists one of them, post pages get a language switch.
+i18n_posts:
+  enable: true
+  # 首页列表代表该组的译本 (没有该语言时取最早的一篇) / translation listed on the home page (fallback: the earliest one)
+  prefer: zh
+  # 语言切换上显示的名字 (没列出的语言显示为大写代码) / switch labels (unlisted codes are shown upper-cased)
+  labels:
+    zh: 中文
+    en: English
+    ja: 日本語
+
 # 是否显示Twitter分享卡片图像(图像尺寸要求：1200*600，creatorid不需要带@符号。注意：链接必须是完整url，否则Twitter将无法读取图片信息）
 twitterpic:
   enable: false

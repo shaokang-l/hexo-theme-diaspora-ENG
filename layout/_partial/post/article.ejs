@@ -1,3 +1,4 @@
+<% var i18nSibs = typeof i18n_siblings == 'function' ? i18n_siblings(page) : []; %>
 <div class="article">
     <div class='main'>
         <h1 class="title">
@@ -9,7 +10,8 @@
             </span>
             <%- partial('_partial/post/tag', {post: page}) %>
         </div>
-        <div class="content markdown">
+        <% if (i18nSibs.length) { %><%- partial('_partial/post/i18n-switch', {sibs: i18nSibs}) %><% } %>
+        <div class="content markdown"<% if (i18nSibs.length) { %> lang="<%= i18n_lang(page) %>"<% } %>>
             <%- page.content %>
                 <!--[if lt IE 9]><script>document.createElement('audio');</script><![endif]-->
                 <audio id="audio" loop="1" preload="auto" controls="controls"

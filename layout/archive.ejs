@@ -23,6 +23,7 @@
                       <a target="_self" href="<%- url_for(psg.path) %>">
                         <%= psg.title %>
                       </a>
+                      <% if (typeof i18n_siblings == 'function' && i18n_siblings(psg).length) { %><span class="i18n-tag" lang="<%= i18n_lang(psg) %>"><%= i18n_label(i18n_lang(psg)) %></span><% } %>
                     </div>
                     <% } %>
           </div>
